@@ -107,4 +107,37 @@ async function getTournament(slug: string) {
   return { numerator: 0, denominator: 0 };
 }
 
+// March 2015 has the first start.gg Melee tournament
+let year = 2015;
+let monthI = 2;
+let afterS = Date.UTC(year, monthI) / 1000;
+let beforeS = Date.UTC(year, monthI + 1) / 1000;
+
+function setInitialMonth(initYear: number, initMonthNum: number) {
+  year = initYear;
+  monthI = initMonthNum - 1;
+  afterS = Date.UTC(year, monthI) / 1000;
+  beforeS = Date.UTC(year, monthI + 1) / 1000;
+}
+
+function progressOneMonth() {
+  monthI += 1;
+  if (monthI >= 12) {
+    year += 1;
+    monthI = 0;
+  }
+  afterS = Date.UTC(year, monthI) / 1000;
+  beforeS = Date.UTC(year, monthI + 1) / 1000;
+}
+
+function everyMonth() {
+  const currentYear = new Date().getUTCFullYear();
+  const currentMonthI = new Date().getUTCMonth();
+  while (year < currentYear || monthI < currentMonthI) {
+    console.log(`${year}-${monthI + 1}: ${afterS} - ${beforeS}`);
+    progressOneMonth();
+  }
+}
+
 console.log(await getTournament('unranked'));
+everyMonth();
