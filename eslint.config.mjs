@@ -1,6 +1,5 @@
 // @ts-check
 import eslint from '@eslint/js';
-import vitest from '@vitest/eslint-plugin';
 import eslintConfigPrettier from 'eslint-config-prettier';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
@@ -23,7 +22,7 @@ export default tseslint.config(
     },
 
     rules: {
-      '@typescript-eslint/explicit-function-return-type': 'warn',
+      '@typescript-eslint/no-explicit-any': 'off',
     },
 
     languageOptions: {
@@ -37,29 +36,6 @@ export default tseslint.config(
 
       parserOptions: {
         project: './tsconfig.json',
-      },
-    },
-  },
-  {
-    files: ['__tests__/**'],
-
-    plugins: {
-      vitest,
-    },
-
-    rules: {
-      ...vitest.configs.recommended.rules,
-    },
-
-    settings: {
-      vitest: {
-        typecheck: true,
-      },
-    },
-
-    languageOptions: {
-      globals: {
-        ...vitest.environments.env.globals,
       },
     },
   },
