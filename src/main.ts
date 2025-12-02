@@ -5,6 +5,15 @@ type SetsRatio = {
   withColors: number;
 };
 
+function getEmptySetsRatio(): SetsRatio {
+  return {
+    total: 0,
+    withCharactersAndStages: 0,
+    withStockCounts: 0,
+    withColors: 0,
+  };
+}
+
 async function wrappedFetch(
   input: URL | RequestInfo,
   init?: RequestInit | undefined,
@@ -32,148 +41,98 @@ async function wrappedFetch(
 }
 
 async function getTournament(slug: string): Promise<SetsRatio> {
+  const setsRatio = getEmptySetsRatio();
   const tournamentResponse = await wrappedFetch(
     `https://api.start.gg/tournament/${slug}?expand[]=event`,
   );
-  if (
-    Array.isArray(tournamentResponse.entities?.event) &&
-    tournamentResponse.entities.event.length > 0
-  ) {
-    return (
-      await Promise.all(
-        (tournamentResponse.entities.event as any[])
-          .filter(
-            (event) =>
-              Number.isInteger(event.id) &&
-              event.videogameId === 1 &&
-              !event.isOnline,
-          )
-          .map(async (event): Promise<SetsRatio> => {
-            const eventResponse = await wrappedFetch(
-              `https://api.start.gg/event/${event.id}?expand[]=groups`,
+  if (Array.isArray(tournamentResponse.entities.event)) {
+    const eligibleEvents = (tournamentResponse.entities.event as any[]).filter(
+      (event) =>
+        Number.isInteger(event.id) &&
+        event.videogameId === 1 &&
+        !event.isOnline,
+    );
+    for (const event of eligibleEvents) {
+      const eventResponse = await wrappedFetch(
+        `https://api.start.gg/event/${event.id}?expand[]=groups`,
+      );
+      if (Array.isArray(eventResponse.entities?.groups)) {
+        const eligibleGroups = (eventResponse.entities.groups as any[]).filter(
+          (group) => Number.isInteger(group.id),
+        );
+        for (const group of eligibleGroups) {
+          const groupResponse = await wrappedFetch(
+            `https://api.start.gg/phase_group/${group.id}?expand[]=sets`,
+          );
+          if (Array.isArray(groupResponse.entities?.sets)) {
+            const eligibleSets: any[] = groupResponse.entities.sets.filter(
+              (set) =>
+                set.state === 3 &&
+                Number.isInteger(set.entrant1Id) &&
+                Number.isInteger(set.entrant2Id) &&
+                set.entrant1Score !== -1 &&
+                set.entrant2Score !== -1 &&
+                !set.unreachable,
             );
-            if (
-              Array.isArray(eventResponse.entities?.groups) &&
-              eventResponse.entities.groups.length > 0
-            ) {
-              return (
-                await Promise.all(
-                  (eventResponse.entities.groups as any[])
-                    .filter((group) => Number.isInteger(group.id))
-                    .map(async (group): Promise<SetsRatio> => {
-                      const groupResponse = await wrappedFetch(
-                        `https://api.start.gg/phase_group/${group.id}?expand[]=sets`,
-                      );
-                      if (Array.isArray(groupResponse.entities?.sets)) {
-                        const eligibleSets: any[] =
-                          groupResponse.entities.sets.filter(
-                            (set) =>
-                              set.state === 3 &&
-                              Number.isInteger(set.entrant1Id) &&
-                              Number.isInteger(set.entrant2Id) &&
-                              set.entrant1Score !== -1 &&
-                              set.entrant2Score !== -1 &&
-                              !set.unreachable,
-                          );
-                        const total = eligibleSets.length;
+            const total = eligibleSets.length;
 
-                        const charactersAndStagesSets = eligibleSets.filter(
-                          (set) =>
-                            Array.isArray(set.entrant1CharacterIds) &&
-                            (set.entrant1CharacterIds as any[]).length > 0 &&
-                            (set.entrant1CharacterIds as any[]).every(
-                              (characterId) =>
-                                Number.isInteger(characterId) &&
-                                characterId >= 1 &&
-                                characterId <= 26,
-                            ) &&
-                            Array.isArray(set.entrant2CharacterIds) &&
-                            (set.entrant2CharacterIds as any[]).length > 0 &&
-                            (set.entrant2CharacterIds as any[]).every(
-                              (characterId) =>
-                                Number.isInteger(characterId) &&
-                                characterId >= 1 &&
-                                characterId <= 26,
-                            ) &&
-                            Array.isArray(set.games) &&
-                            set.games.length > 0 &&
-                            (set.games as any[]).every(
-                              (game) =>
-                                Number.isInteger(game.stageId) &&
-                                game.stageId >= 1 &&
-                                game.stageId <= 29,
-                            ),
-                        );
-                        const withCharactersAndStages =
-                          charactersAndStagesSets.length;
+            const charactersAndStagesSets = eligibleSets.filter(
+              (set) =>
+                Array.isArray(set.entrant1CharacterIds) &&
+                (set.entrant1CharacterIds as any[]).length > 0 &&
+                (set.entrant1CharacterIds as any[]).every(
+                  (characterId) =>
+                    Number.isInteger(characterId) &&
+                    characterId >= 1 &&
+                    characterId <= 26,
+                ) &&
+                Array.isArray(set.entrant2CharacterIds) &&
+                (set.entrant2CharacterIds as any[]).length > 0 &&
+                (set.entrant2CharacterIds as any[]).every(
+                  (characterId) =>
+                    Number.isInteger(characterId) &&
+                    characterId >= 1 &&
+                    characterId <= 26,
+                ) &&
+                Array.isArray(set.games) &&
+                set.games.length > 0 &&
+                (set.games as any[]).every(
+                  (game) =>
+                    Number.isInteger(game.stageId) &&
+                    game.stageId >= 1 &&
+                    game.stageId <= 29,
+                ),
+            );
+            const withCharactersAndStages = charactersAndStagesSets.length;
 
-                        const stockCountsSets = charactersAndStagesSets.filter(
-                          (set) =>
-                            (set.games as any[]).every(
-                              (game) =>
-                                game.entrant1P1Stocks || game.entrant2P1Stocks,
-                            ),
-                        );
-                        const withStockCounts = stockCountsSets.length;
+            const stockCountsSets = charactersAndStagesSets.filter((set) =>
+              (set.games as any[]).every(
+                (game) => game.entrant1P1Stocks || game.entrant2P1Stocks,
+              ),
+            );
+            const withStockCounts = stockCountsSets.length;
 
-                        const colorsSets = stockCountsSets.filter((set) =>
-                          (set.games as any[]).every(
-                            (game) =>
-                              game.entrant1P1Stocks &&
-                              game.entrant1P1Stocks >= 100 &&
-                              game.entrant2P1Stocks &&
-                              game.entrant2P1Stocks >= 100,
-                          ),
-                        );
-                        const withColors = colorsSets.length;
+            const colorsSets = stockCountsSets.filter((set) =>
+              (set.games as any[]).every(
+                (game) =>
+                  game.entrant1P1Stocks &&
+                  game.entrant1P1Stocks >= 100 &&
+                  game.entrant2P1Stocks &&
+                  game.entrant2P1Stocks >= 100,
+              ),
+            );
+            const withColors = colorsSets.length;
 
-                        return {
-                          total,
-                          withCharactersAndStages,
-                          withStockCounts,
-                          withColors,
-                        };
-                      }
-                      return {
-                        total: 0,
-                        withCharactersAndStages: 0,
-                        withStockCounts: 0,
-                        withColors: 0,
-                      };
-                    }),
-                )
-              ).reduce((previous, current) => ({
-                total: previous.total + current.total,
-                withCharactersAndStages:
-                  previous.withCharactersAndStages +
-                  current.withCharactersAndStages,
-                withStockCounts:
-                  previous.withStockCounts + current.withStockCounts,
-                withColors: previous.withColors + current.withColors,
-              }));
-            }
-            return {
-              total: 0,
-              withCharactersAndStages: 0,
-              withStockCounts: 0,
-              withColors: 0,
-            };
-          }),
-      )
-    ).reduce((previous, current) => ({
-      total: previous.total + current.total,
-      withCharactersAndStages:
-        previous.withCharactersAndStages + current.withCharactersAndStages,
-      withStockCounts: previous.withStockCounts + current.withStockCounts,
-      withColors: previous.withColors + current.withColors,
-    }));
+            setsRatio.total += total;
+            setsRatio.withCharactersAndStages += withCharactersAndStages;
+            setsRatio.withStockCounts += withStockCounts;
+            setsRatio.withColors += withColors;
+          }
+        }
+      }
+    }
   }
-  return {
-    total: 0,
-    withCharactersAndStages: 0,
-    withStockCounts: 0,
-    withColors: 0,
-  };
+  return setsRatio;
 }
 
 async function fetchGql(key: string, query: string, variables: any) {
@@ -277,34 +236,17 @@ async function everyMonth(
   const currentYear = new Date().getUTCFullYear();
   const currentMonthI = new Date().getUTCMonth();
   while (year < currentYear || monthI < currentMonthI) {
+    const setsRatio = getEmptySetsRatio();
     const slugs = await getTournamentSlugs(key, afterS, beforeS);
-    const setsRatio: SetsRatio = {
-      total: 0,
-      withCharactersAndStages: 0,
-      withStockCounts: 0,
-      withColors: 0,
-    };
-    let i = 0;
-    while (true) {
-      const slug = slugs[i];
+    for (const slug of slugs) {
       const { total, withCharactersAndStages, withStockCounts, withColors } =
         await getTournament(slug);
       setsRatio.total += total;
       setsRatio.withCharactersAndStages += withCharactersAndStages;
       setsRatio.withStockCounts += withStockCounts;
       setsRatio.withColors += withColors;
-
-      i++;
-      if (i < slugs.length) {
-        await new Promise<void>((resolve) => {
-          setTimeout(() => {
-            resolve();
-          }, 1000);
-        });
-      } else {
-        break;
-      }
     }
+
     console.log(
       `${year}-${monthI + 1},${slugs.length},${setsRatio.total},${setsRatio.withCharactersAndStages},${setsRatio.withStockCounts},${setsRatio.withColors}`,
     );
