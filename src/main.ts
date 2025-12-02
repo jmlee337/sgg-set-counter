@@ -267,13 +267,13 @@ async function everyMonth(
       setsRatio.withStockCounts += withStockCounts;
       setsRatio.withColors += withColors;
       process.stdout.write('.');
-      if ((i + 1) % 100 === 0) {
-        process.stdout.write(`[${i + 1}]`);
+      if ((i + 1) % 50 === 0) {
+        process.stdout.write(`[${i + 1}]\n`);
       } else if (
-        Math.floor((i + 1) / 100) === Math.floor(slugs.length / 100) &&
+        Math.floor((i + 1) / 50) === Math.floor(slugs.length / 50) &&
         (i + 1) % 10 === 0
       ) {
-        process.stdout.write(`[${i + 1}]`);
+        process.stdout.write(`[${(i + 1) % 100}]`);
       }
     }
     console.log('\n');
