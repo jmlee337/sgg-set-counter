@@ -1,3 +1,6 @@
+import { readFile } from 'fs/promises';
+import path from 'path';
+
 type SetsRatio = {
   total: number;
   withCharactersAndStages: number;
@@ -202,19 +205,14 @@ async function getTournamentSlugs(
   return slugs;
 }
 
-function progressOneMonth(
-  year: number,
-  monthI: number,
-  afterS: number,
-  beforeS: number,
-) {
+function progressOneMonth(year: number, monthI: number) {
   monthI += 1;
   if (monthI >= 12) {
     year += 1;
     monthI = 0;
   }
-  afterS = Date.UTC(year, monthI) / 1000;
-  beforeS = Date.UTC(year, monthI + 1) / 1000;
+  const afterS = Date.UTC(year, monthI) / 1000;
+  const beforeS = Date.UTC(year, monthI + 1) / 1000;
 
   return {
     year,
@@ -248,20 +246,36 @@ async function everyMonth(
     }
 
     console.log(
-      `${year}-${monthI + 1},${slugs.length},${setsRatio.total},${setsRatio.withCharactersAndStages},${setsRatio.withStockCounts},${setsRatio.withColors}`,
+      `${year},${monthI + 1},${slugs.length},${setsRatio.total},${setsRatio.withCharactersAndStages},${setsRatio.withStockCounts},${setsRatio.withColors}`,
     );
 
-    ({ year, monthI, afterS, beforeS } = progressOneMonth(
-      year,
-      monthI,
-      afterS,
-      beforeS,
-    ));
+    ({ year, monthI, afterS, beforeS } = progressOneMonth(year, monthI));
   }
 }
 
 if (process.argv.length < 3) {
   console.log('node build/src/main.js [START.GG API KEY]');
 } else {
-  everyMonth(process.argv[2]);
+  let results = '';
+  const resultsPath = path.join(process.cwd(), 'results.csv');
+  try {
+    results = await readFile(resultsPath, { encoding: 'utf8' });
+  } catch {
+    console.log(`could not read ${resultsPath}`);
+  }
+
+  if (results) {
+    const lines = results.split('\n').filter((substr) => substr.length > 0);
+    if (lines.length > 1) {
+      const lastLine = lines[lines.length - 1];
+      const [lastYear, lastMonth] = lastLine
+        .split(',')
+        .map((substr) => Number.parseInt(substr, 10));
+      const { year, monthI } = progressOneMonth(lastYear, lastMonth - 1);
+      console.log(`starting at ${year}/${monthI + 1}`);
+      everyMonth(process.argv[2], year, monthI);
+    } else {
+      everyMonth(process.argv[2]);
+    }
+  }
 }
