@@ -1,4 +1,4 @@
-import { readFile } from 'fs/promises';
+import { appendFile, readFile } from 'fs/promises';
 import path from 'path';
 
 type SetsRatio = {
@@ -22,32 +22,46 @@ async function wrappedFetch(
   init?: RequestInit | undefined,
   nextDelayMs: number = 1000,
 ) {
-  const response = await fetch(input, init);
-  if (response.ok) {
-    return response.json();
-  } else if (response.status >= 500) {
-    console.log(`${response.status}: ${input}, retrying in ${nextDelayMs}`);
-    return new Promise((resolve, reject) => {
-      setTimeout(async () => {
-        try {
-          const nextResponse = await wrappedFetch(input, init, nextDelayMs * 2);
-          resolve(nextResponse);
-        } catch (e: unknown) {
-          reject(e);
-        }
-      }, nextDelayMs);
-    });
-  } else {
-    console.log(`${response.status}: ${input}`);
-    throw new Error(response.statusText);
+  try {
+    const response = await fetch(input, init);
+    if (response.ok) {
+      return response.json();
+    } else if (response.status >= 500) {
+      console.log(`${response.status}: ${input}, retrying in ${nextDelayMs}`);
+      return new Promise((resolve, reject) => {
+        setTimeout(async () => {
+          try {
+            const nextResponse = await wrappedFetch(
+              input,
+              init,
+              nextDelayMs * 2,
+            );
+            resolve(nextResponse);
+          } catch (e: unknown) {
+            reject(e);
+          }
+        }, nextDelayMs);
+      });
+    } else {
+      console.log(`\n${response.status}: ${input}`);
+      throw new Error(response.statusText);
+    }
+  } catch (e: any) {
+    console.log('');
+    throw e;
   }
 }
 
+const progress = ['-', '\\', '|', '/'];
 async function getTournament(slug: string): Promise<SetsRatio> {
+  let iProgress = 0;
   const setsRatio = getEmptySetsRatio();
   const tournamentResponse = await wrappedFetch(
     `https://api.start.gg/tournament/${slug}?expand[]=event`,
   );
+  iProgress++;
+  process.stdout.write(progress[iProgress % progress.length]);
+
   if (Array.isArray(tournamentResponse.entities.event)) {
     const eligibleEvents = (tournamentResponse.entities.event as any[]).filter(
       (event) =>
@@ -59,6 +73,9 @@ async function getTournament(slug: string): Promise<SetsRatio> {
       const eventResponse = await wrappedFetch(
         `https://api.start.gg/event/${event.id}?expand[]=groups`,
       );
+      iProgress++;
+      process.stdout.write(`\b${progress[iProgress % progress.length]}`);
+
       if (Array.isArray(eventResponse.entities?.groups)) {
         const eligibleGroups = (eventResponse.entities.groups as any[]).filter(
           (group) => Number.isInteger(group.id),
@@ -67,6 +84,9 @@ async function getTournament(slug: string): Promise<SetsRatio> {
           const groupResponse = await wrappedFetch(
             `https://api.start.gg/phase_group/${group.id}?expand[]=sets`,
           );
+          iProgress++;
+          process.stdout.write(`\b${progress[iProgress % progress.length]}`);
+
           if (Array.isArray(groupResponse.entities?.sets)) {
             const eligibleSets: any[] = groupResponse.entities.sets.filter(
               (set) =>
@@ -135,6 +155,8 @@ async function getTournament(slug: string): Promise<SetsRatio> {
       }
     }
   }
+
+  process.stdout.write('\b');
   return setsRatio;
 }
 
@@ -236,17 +258,29 @@ async function everyMonth(
   while (year < currentYear || monthI < currentMonthI) {
     const setsRatio = getEmptySetsRatio();
     const slugs = await getTournamentSlugs(key, afterS, beforeS);
-    for (const slug of slugs) {
+    console.log(`${year}/${monthI + 1}: ${slugs.length} tournaments`);
+    for (let i = 0; i < slugs.length; i++) {
       const { total, withCharactersAndStages, withStockCounts, withColors } =
-        await getTournament(slug);
+        await getTournament(slugs[i]);
       setsRatio.total += total;
       setsRatio.withCharactersAndStages += withCharactersAndStages;
       setsRatio.withStockCounts += withStockCounts;
       setsRatio.withColors += withColors;
+      process.stdout.write('.');
+      if ((i + 1) % 100 === 0) {
+        process.stdout.write(`[${i + 1}]`);
+      } else if (
+        Math.floor((i + 1) / 100) === Math.floor(slugs.length / 100) &&
+        (i + 1) % 10 === 0
+      ) {
+        process.stdout.write(`[${i + 1}]`);
+      }
     }
+    console.log('\n');
 
-    console.log(
-      `${year},${monthI + 1},${slugs.length},${setsRatio.total},${setsRatio.withCharactersAndStages},${setsRatio.withStockCounts},${setsRatio.withColors}`,
+    await appendFile(
+      path.join(process.cwd(), 'results.csv'),
+      `${year},${monthI + 1},${slugs.length},${setsRatio.total},${setsRatio.withCharactersAndStages},${setsRatio.withStockCounts},${setsRatio.withColors}\n`,
     );
 
     ({ year, monthI, afterS, beforeS } = progressOneMonth(year, monthI));
@@ -272,7 +306,6 @@ if (process.argv.length < 3) {
         .split(',')
         .map((substr) => Number.parseInt(substr, 10));
       const { year, monthI } = progressOneMonth(lastYear, lastMonth - 1);
-      console.log(`starting at ${year}/${monthI + 1}`);
       everyMonth(process.argv[2], year, monthI);
     } else {
       everyMonth(process.argv[2]);
