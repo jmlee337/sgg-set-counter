@@ -1,6 +1,8 @@
-type Ratio = {
-  numerator: number;
-  denominator: number;
+type SetsRatio = {
+  withCharactersAndStages: number;
+  withStockCounts: number;
+  withColors: number;
+  total: number;
 };
 
 async function wrappedFetch(url: string, nextDelayMs: number = 1000) {
@@ -25,7 +27,7 @@ async function wrappedFetch(url: string, nextDelayMs: number = 1000) {
   }
 }
 
-async function getTournament(slug: string) {
+async function getTournament(slug: string): Promise<SetsRatio> {
   const tournamentResponse = await wrappedFetch(
     `https://api.start.gg/tournament/${slug}?expand[]=event`,
   );
@@ -36,7 +38,7 @@ async function getTournament(slug: string) {
           .filter(
             (event) => Number.isInteger(event.id) && event.videogameId === 1,
           )
-          .map(async (event): Promise<Ratio> => {
+          .map(async (event): Promise<SetsRatio> => {
             const eventResponse = await wrappedFetch(
               `https://api.start.gg/event/${event.id}?expand[]=groups`,
             );
@@ -45,21 +47,24 @@ async function getTournament(slug: string) {
                 await Promise.all(
                   (eventResponse.entities.groups as any[])
                     .filter((group) => Number.isInteger(group.id))
-                    .map(async (group): Promise<Ratio> => {
+                    .map(async (group): Promise<SetsRatio> => {
                       const groupResponse = await wrappedFetch(
                         `https://api.start.gg/phase_group/${group.id}?expand[]=sets`,
                       );
                       if (Array.isArray(groupResponse.entities?.sets)) {
-                        const playedSets = groupResponse.entities.sets.filter(
-                          (set) =>
-                            set.state === 3 &&
-                            Number.isInteger(set.entrant1Id) &&
-                            Number.isInteger(set.entrant2Id) &&
-                            set.entrant1Score !== -1 &&
-                            set.entrant2Score !== -1,
-                        );
-                        const denominator = playedSets.length;
-                        const dataSets = playedSets.filter(
+                        const eligibleSets: any[] =
+                          groupResponse.entities.sets.filter(
+                            (set) =>
+                              set.state === 3 &&
+                              Number.isInteger(set.entrant1Id) &&
+                              Number.isInteger(set.entrant2Id) &&
+                              set.entrant1Score !== -1 &&
+                              set.entrant2Score !== -1 &&
+                              !set.unreachable,
+                          );
+                        const total = eligibleSets.length;
+
+                        const charactersAndStagesSets = eligibleSets.filter(
                           (set) =>
                             Array.isArray(set.entrant1CharacterIds) &&
                             (set.entrant1CharacterIds as any[]).length > 0 &&
@@ -85,26 +90,76 @@ async function getTournament(slug: string) {
                                 game.stageId <= 29,
                             ),
                         );
-                        const numerator = dataSets.length;
-                        return { numerator, denominator };
+                        const withCharactersAndStages =
+                          charactersAndStagesSets.length;
+
+                        const stockCountsSets = charactersAndStagesSets.filter(
+                          (set) =>
+                            (set.games as any[]).every(
+                              (game) =>
+                                game.entrant1P1Stocks && game.entrant2P1Stocks,
+                            ),
+                        );
+                        const withStockCounts = stockCountsSets.length;
+
+                        const colorsSets = stockCountsSets.filter((set) =>
+                          (set.games as any[]).every(
+                            (game) =>
+                              game.entrant1P1Stocks &&
+                              game.entrant1P1Stocks >= 100 &&
+                              game.entrant2P1Stocks &&
+                              game.entrant2P1Stocks >= 100,
+                          ),
+                        );
+                        const withColors = colorsSets.length;
+
+                        return {
+                          withCharactersAndStages,
+                          withStockCounts,
+                          withColors,
+                          total,
+                        };
                       }
-                      return { numerator: 0, denominator: 0 };
+                      return {
+                        withCharactersAndStages: 0,
+                        withStockCounts: 0,
+                        withColors: 0,
+                        total: 0,
+                      };
                     }),
                 )
               ).reduce((previous, current) => ({
-                numerator: previous.numerator + current.numerator,
-                denominator: previous.denominator + current.denominator,
+                withCharactersAndStages:
+                  previous.withCharactersAndStages +
+                  current.withCharactersAndStages,
+                withStockCounts:
+                  previous.withStockCounts + current.withStockCounts,
+                withColors: previous.withColors + current.withColors,
+                total: previous.total + current.total,
               }));
             }
-            return { numerator: 0, denominator: 0 };
+            return {
+              withCharactersAndStages: 0,
+              withStockCounts: 0,
+              withColors: 0,
+              total: 0,
+            };
           }),
       )
     ).reduce((previous, current) => ({
-      numerator: previous.numerator + current.numerator,
-      denominator: previous.denominator + current.denominator,
+      withCharactersAndStages:
+        previous.withCharactersAndStages + current.withCharactersAndStages,
+      withStockCounts: previous.withStockCounts + current.withStockCounts,
+      withColors: previous.withColors + current.withColors,
+      total: previous.total + current.total,
     }));
   }
-  return { numerator: 0, denominator: 0 };
+  return {
+    withCharactersAndStages: 0,
+    withStockCounts: 0,
+    withColors: 0,
+    total: 0,
+  };
 }
 
 // March 2015 has the first start.gg Melee tournament
@@ -113,12 +168,14 @@ let monthI = 2;
 let afterS = Date.UTC(year, monthI) / 1000;
 let beforeS = Date.UTC(year, monthI + 1) / 1000;
 
+/*
 function setInitialMonth(initYear: number, initMonthNum: number) {
   year = initYear;
   monthI = initMonthNum - 1;
   afterS = Date.UTC(year, monthI) / 1000;
   beforeS = Date.UTC(year, monthI + 1) / 1000;
 }
+*/
 
 function progressOneMonth() {
   monthI += 1;
