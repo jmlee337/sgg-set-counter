@@ -27,7 +27,7 @@ async function wrappedFetch(
     if (response.ok) {
       return response.json();
     } else if (response.status >= 500) {
-      console.log(`${response.status}: ${input}, retrying in ${nextDelayMs}`);
+      console.log(`\n${response.status}: ${input}, retrying in ${nextDelayMs}`);
       return new Promise((resolve, reject) => {
         setTimeout(async () => {
           try {
@@ -52,14 +52,23 @@ async function wrappedFetch(
   }
 }
 
+const excludedSlugs = new Set<string>([]);
+const excludedOwnerIds = new Set([906371, 1031337]);
 const progress = ['-', '\\', '|', '/'];
 async function getTournament(slug: string): Promise<SetsRatio> {
-  let iProgress = 0;
   const setsRatio = getEmptySetsRatio();
+  if (excludedSlugs.has(slug)) {
+    return setsRatio;
+  }
+
   const tournamentResponse = await wrappedFetch(
     `https://api.start.gg/tournament/${slug}?expand[]=event`,
   );
-  iProgress++;
+  if (excludedOwnerIds.has(tournamentResponse.entities.tournament.ownerId)) {
+    return setsRatio;
+  }
+
+  let iProgress = 0;
   process.stdout.write(progress[iProgress % progress.length]);
 
   if (Array.isArray(tournamentResponse.entities.event)) {
@@ -67,8 +76,14 @@ async function getTournament(slug: string): Promise<SetsRatio> {
       (event) =>
         Number.isInteger(event.id) &&
         event.videogameId === 1 &&
+        (event.state === 2 || event.state === 3) &&
         !event.isOnline,
     );
+    if (eligibleEvents.length > 10) {
+      console.log(
+        `\n${slug} ${tournamentResponse.entities.tournament.ownerId}`,
+      );
+    }
     for (const event of eligibleEvents) {
       const eventResponse = await wrappedFetch(
         `https://api.start.gg/event/${event.id}?expand[]=groups`,
@@ -78,8 +93,15 @@ async function getTournament(slug: string): Promise<SetsRatio> {
 
       if (Array.isArray(eventResponse.entities?.groups)) {
         const eligibleGroups = (eventResponse.entities.groups as any[]).filter(
-          (group) => Number.isInteger(group.id),
+          (group) =>
+            Number.isInteger(group.id) &&
+            (group.state === 2 || group.state === 3),
         );
+        if (eligibleGroups.length > 200) {
+          console.log(
+            `\n${slug} ${tournamentResponse.entities.tournament.ownerId}`,
+          );
+        }
         for (const group of eligibleGroups) {
           const groupResponse = await wrappedFetch(
             `https://api.start.gg/phase_group/${group.id}?expand[]=sets`,
@@ -187,6 +209,7 @@ const TOURNAMENTS_QUERY = `
       nodes {
         hasOfflineEvents
         slug
+        state
       }
     }
   }
@@ -208,7 +231,10 @@ async function getTournamentSlugs(
     if (Array.isArray(nodes)) {
       slugs.push(
         ...nodes
-          .filter((node) => node.hasOfflineEvents)
+          .filter(
+            (node) =>
+              node.hasOfflineEvents && (node.state === 2 || node.state === 3),
+          )
           .map((node) => node.slug.slice(11)),
       );
     }
@@ -244,11 +270,11 @@ function progressOneMonth(year: number, monthI: number) {
   };
 }
 
-// April 2015 has the first real start.gg Melee tournaments
 async function everyMonth(
   key: string,
-  year: number = 2015,
-  monthI: number = 3,
+  // Modern Melee history begins February 2019
+  year: number = 2019,
+  monthI: number = 1,
 ) {
   let afterS = Date.UTC(year, monthI) / 1000;
   let beforeS = Date.UTC(year, monthI + 1) / 1000;
@@ -256,12 +282,18 @@ async function everyMonth(
   const currentYear = new Date().getUTCFullYear();
   const currentMonthI = new Date().getUTCMonth();
   while (year < currentYear || monthI < currentMonthI) {
-    const setsRatio = getEmptySetsRatio();
+    process.stdout.write(`${year}/${monthI + 1}: `);
     const slugs = await getTournamentSlugs(key, afterS, beforeS);
-    console.log(`${year}/${monthI + 1}: ${slugs.length} tournaments`);
+    console.log(`${slugs.length} tournaments to fetch`);
+
+    let numTournaments = 0;
+    const setsRatio = getEmptySetsRatio();
     for (let i = 0; i < slugs.length; i++) {
       const { total, withCharactersAndStages, withStockCounts, withColors } =
         await getTournament(slugs[i]);
+      if (total > 0) {
+        numTournaments++;
+      }
       setsRatio.total += total;
       setsRatio.withCharactersAndStages += withCharactersAndStages;
       setsRatio.withStockCounts += withStockCounts;
@@ -280,7 +312,7 @@ async function everyMonth(
 
     await appendFile(
       path.join(process.cwd(), 'results.csv'),
-      `${year},${monthI + 1},${slugs.length},${setsRatio.total},${setsRatio.withCharactersAndStages},${setsRatio.withStockCounts},${setsRatio.withColors}\n`,
+      `${year},${monthI + 1},${numTournaments},${setsRatio.total},${setsRatio.withCharactersAndStages},${setsRatio.withStockCounts},${setsRatio.withColors}\n`,
     );
 
     ({ year, monthI, afterS, beforeS } = progressOneMonth(year, monthI));
