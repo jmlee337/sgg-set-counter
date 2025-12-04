@@ -351,7 +351,7 @@ async function everyMonth(
       } = await getTournament(
         slugs[i],
         playerIds,
-        path.join(process.cwd(), 'tournaments', `${year}-${monthI + 1}`),
+        path.join(process.cwd(), 'offlineTournaments', `${year}-${monthI + 1}`),
       );
       if (sets > 0) {
         numTournaments++;
