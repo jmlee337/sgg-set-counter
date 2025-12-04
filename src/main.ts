@@ -49,8 +49,17 @@ async function wrappedFetch(
       throw new Error(response.statusText);
     }
   } catch (e: any) {
-    console.log('');
-    throw e;
+    console.log(`\n${e instanceof Error ? e.message : e}`);
+    return new Promise((resolve, reject) => {
+      setTimeout(async () => {
+        try {
+          const nextResponse = await wrappedFetch(input, init, nextDelayMs * 2);
+          resolve(nextResponse);
+        } catch (e: unknown) {
+          reject(e);
+        }
+      }, nextDelayMs);
+    });
   }
 }
 
