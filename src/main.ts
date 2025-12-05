@@ -93,7 +93,7 @@ async function getTournament(
         Number.isInteger(event.id) &&
         event.videogameId === 1 &&
         (event.state === 2 || event.state === 3) &&
-        !event.isOnline,
+        event.isOnline,
     );
     if (eligibleEvents.length > 10) {
       console.log(
@@ -253,13 +253,21 @@ async function fetchGql(key: string, query: string, variables: any) {
 const TOURNAMENTS_QUERY = `
   query tournamentsQuery($afterS: Timestamp, $beforeS: Timestamp, $pageNum: Int) {
     tournaments(
-      query: {page: $pageNum, perPage: 512, filter: {afterDate: $afterS, beforeDate: $beforeS, videogameIds: [1]}}
+      query: {
+        page: $pageNum,
+        perPage: 512,
+        filter: {
+          afterDate: $afterS,
+          beforeDate: $beforeS,
+          videogameIds: [1],
+          hasOnlineEvents: true
+        }
+      }
     ) {
       pageInfo {
         totalPages
       }
       nodes {
-        hasOfflineEvents
         slug
         state
       }
@@ -283,10 +291,7 @@ async function getTournamentSlugs(
     if (Array.isArray(nodes)) {
       slugs.push(
         ...nodes
-          .filter(
-            (node) =>
-              node.hasOfflineEvents && (node.state === 2 || node.state === 3),
-          )
+          .filter((node) => node.state === 2 || node.state === 3)
           .map((node) => node.slug.slice(11)),
       );
     }
@@ -324,9 +329,9 @@ function progressOneMonth(year: number, monthI: number) {
 
 async function everyMonth(
   key: string,
-  // Modern Melee history begins February 2019
-  year: number = 2019,
-  monthI: number = 1,
+  // Online Melee history begins June 2020
+  year: number = 2020,
+  monthI: number = 5,
 ) {
   let afterS = Date.UTC(year, monthI) / 1000;
   let beforeS = Date.UTC(year, monthI + 1) / 1000;
@@ -351,7 +356,7 @@ async function everyMonth(
       } = await getTournament(
         slugs[i],
         playerIds,
-        path.join(process.cwd(), 'offlineTournaments', `${year}-${monthI + 1}`),
+        path.join(process.cwd(), 'onlineTournaments', `${year}-${monthI + 1}`),
       );
       if (sets > 0) {
         numTournaments++;
