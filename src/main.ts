@@ -424,7 +424,7 @@ async function everyMonth(
 }
 
 async function reprocess() {
-  const tournamentsPath = path.join(process.cwd(), 'offlineTournaments');
+  const tournamentsPath = path.join(process.cwd(), 'onlineTournaments');
   const monthSubdirs = (await readdir(tournamentsPath, { withFileTypes: true }))
     .filter(
       (dirent) =>
