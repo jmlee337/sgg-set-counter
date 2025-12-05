@@ -1,4 +1,5 @@
 # start.gg Set Counter
+This repo also archives the start.gg REST API Melee corpus, which is available for [download](https://drive.google.com/drive/folders/1IZBdW4kg5Ln0l5sr3bxYVnlAVLgNo8RF).
 
 ## Development
 Clone the repo:
