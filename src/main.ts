@@ -329,9 +329,9 @@ function progressOneMonth(year: number, monthI: number) {
 
 async function everyMonth(
   key: string,
-  // Online Melee history begins June 2020
-  year: number = 2020,
-  monthI: number = 5,
+  // Modern Melee history begins February 2019
+  year: number = 2019,
+  monthI: number = 1,
 ) {
   let afterS = Date.UTC(year, monthI) / 1000;
   let beforeS = Date.UTC(year, monthI + 1) / 1000;
