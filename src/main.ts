@@ -440,20 +440,32 @@ async function reprocess() {
     });
 
   for (const [year, month] of monthSubdirs) {
-    const monthPath = path.join(tournamentsPath, `${year}-${month}`);
-    const slugSubdirs = (await readdir(monthPath, { withFileTypes: true }))
+    const offlineMonthPath = path.join(tournamentsPath, `${year}-${month}`);
+    const offlineSlugSubdirs = (
+      await readdir(offlineMonthPath, { withFileTypes: true })
+    )
+      .filter((dirent) => dirent.isDirectory())
+      .map((dirent) => dirent.name);
+    const onlineMonthPath = path.join(
+      process.cwd(),
+      'onlineTournaments',
+      `${year}-${month}`,
+    );
+    const onlineSlugSubdirs = (
+      await readdir(onlineMonthPath, { withFileTypes: true })
+    )
       .filter((dirent) => dirent.isDirectory())
       .map((dirent) => dirent.name);
     console.log(
-      `${year}/${month}: ${slugSubdirs.length} tournaments to reprocess`,
+      `${year}/${month}: ${offlineSlugSubdirs.length + onlineSlugSubdirs.length} tournaments to reprocess`,
     );
 
     const stats = getEmptyStats();
     const uniquePlayerIds = new Set<number>();
-    const entrantsArr = await Promise.all(
+    const offlineEntrantsArr = await Promise.all(
       // get tournament
-      slugSubdirs.map(async (slugSubdir) => {
-        const slugPath = path.join(monthPath, slugSubdir);
+      offlineSlugSubdirs.map(async (slugSubdir) => {
+        const slugPath = path.join(offlineMonthPath, slugSubdir);
         const jsonSubpaths = (await readdir(slugPath, { withFileTypes: true }))
           .filter((dirent) => dirent.isFile() && dirent.name.endsWith('.json'))
           .map((dirent) => dirent.name);
@@ -493,6 +505,49 @@ async function reprocess() {
       }),
     );
 
+    const onlineEntrantsArr = await Promise.all(
+      onlineSlugSubdirs.map(async (slugSubdir) => {
+        const slugPath = path.join(onlineMonthPath, slugSubdir);
+        const jsonSubpaths = (await readdir(slugPath, { withFileTypes: true }))
+          .filter((dirent) => dirent.isFile() && dirent.name.endsWith('.json'))
+          .map((dirent) => dirent.name);
+        const slugSubdirIndex = jsonSubpaths.indexOf(`${slugSubdir}.json`);
+        if (slugSubdirIndex !== -1) {
+          jsonSubpaths.splice(slugSubdirIndex, 1);
+        }
+
+        const localPlayerIds = new Set<number>();
+        await Promise.all(
+          // get group
+          jsonSubpaths.map(async (jsonSubpath) => {
+            const groupResponse = JSON.parse(
+              await readFile(path.join(slugPath, jsonSubpath), {
+                encoding: 'utf8',
+              }),
+            );
+
+            const {
+              sets,
+              withCharactersAndStages,
+              withStockCounts,
+              withColors,
+            } = processGroupResponse(
+              groupResponse,
+              localPlayerIds,
+              uniquePlayerIds,
+            );
+
+            stats.sets += sets;
+            stats.withCharactersAndStages += withCharactersAndStages;
+            stats.withStockCounts += withStockCounts;
+            stats.withColors += withColors;
+          }),
+        );
+        return localPlayerIds.size;
+      }),
+    );
+
+    const entrantsArr = [...offlineEntrantsArr, ...onlineEntrantsArr];
     entrantsArr.sort((a, b) => a - b);
     const halfI = Math.floor(entrantsArr.length / 2);
     const medianEntrants =
