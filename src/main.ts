@@ -364,6 +364,13 @@ async function everyMonth(
     const slugs = await getTournamentSlugs(key, afterS, beforeS);
     console.log(`${slugs.length} tournaments to fetch`);
 
+    const monthPath = path.join(
+      process.cwd(),
+      'offlineTournaments',
+      `${year}-${monthI + 1}`,
+    );
+    await mkdir(monthPath, { recursive: true });
+
     let numTournaments = 0;
     const entrantsArr: number[] = [];
     const stats = getEmptyStats();
@@ -375,11 +382,7 @@ async function everyMonth(
         withCharactersAndStages,
         withStockCounts,
         withColors,
-      } = await getTournament(
-        slugs[i],
-        uniquePlayerIds,
-        path.join(process.cwd(), 'offlineTournaments', `${year}-${monthI + 1}`),
-      );
+      } = await getTournament(slugs[i], uniquePlayerIds, monthPath);
       if (sets > 0) {
         numTournaments++;
         if (entrants > 0) {
