@@ -495,7 +495,7 @@ async function reprocess() {
       }),
     );
 
-    entrantsArr.sort();
+    entrantsArr.sort((a, b) => a - b);
     const halfI = Math.floor(entrantsArr.length / 2);
     const medianEntrants =
       entrantsArr.length % 2 === 0
