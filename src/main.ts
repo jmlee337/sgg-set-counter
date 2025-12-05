@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readFile, writeFile } from 'fs/promises';
+import { appendFile, mkdir, readdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
 
 type Stats = {
@@ -63,6 +63,105 @@ async function wrappedFetch(
   }
 }
 
+function processGroupResponse(
+  groupResponse: any,
+  localPlayerIds: Set<number>,
+  uniquePlayerIds: Set<number>,
+) {
+  if (
+    Array.isArray(groupResponse.entities?.entrants) &&
+    Array.isArray(groupResponse.entities?.sets)
+  ) {
+    const entrantIdToPlayerIds = new Map<number, number[]>(
+      (groupResponse.entities.entrants as any[]).map((entrant) => [
+        entrant.id,
+        Object.values(entrant.mutations.players).map(
+          (player: any) => player.id,
+        ),
+      ]),
+    );
+    const eligibleSets = (groupResponse.entities.sets as any[]).filter(
+      (set) =>
+        set.state === 3 &&
+        Number.isInteger(set.entrant1Id) &&
+        Number.isInteger(set.entrant2Id) &&
+        set.entrant1Score !== -1 &&
+        set.entrant2Score !== -1 &&
+        !set.unreachable,
+    );
+    eligibleSets.forEach((set) => {
+      const playerIdPred = (playerId: number) => {
+        localPlayerIds.add(playerId);
+        uniquePlayerIds.add(playerId);
+      };
+      entrantIdToPlayerIds.get(set.entrant1Id)?.forEach(playerIdPred);
+      entrantIdToPlayerIds.get(set.entrant2Id)?.forEach(playerIdPred);
+    });
+    const sets = eligibleSets.length;
+
+    const charactersAndStagesSets = eligibleSets.filter(
+      (set) =>
+        Array.isArray(set.entrant1CharacterIds) &&
+        (set.entrant1CharacterIds as any[]).length > 0 &&
+        (set.entrant1CharacterIds as any[]).every(
+          (characterId) =>
+            Number.isInteger(characterId) &&
+            characterId >= 1 &&
+            characterId <= 26,
+        ) &&
+        Array.isArray(set.entrant2CharacterIds) &&
+        (set.entrant2CharacterIds as any[]).length > 0 &&
+        (set.entrant2CharacterIds as any[]).every(
+          (characterId) =>
+            Number.isInteger(characterId) &&
+            characterId >= 1 &&
+            characterId <= 26,
+        ) &&
+        Array.isArray(set.games) &&
+        set.games.length > 0 &&
+        (set.games as any[]).every(
+          (game) =>
+            Number.isInteger(game.stageId) &&
+            game.stageId >= 1 &&
+            game.stageId <= 29,
+        ),
+    );
+    const withCharactersAndStages = charactersAndStagesSets.length;
+
+    const stockCountsSets = charactersAndStagesSets.filter((set) =>
+      (set.games as any[]).every(
+        (game) => game.entrant1P1Stocks || game.entrant2P1Stocks,
+      ),
+    );
+    const withStockCounts = stockCountsSets.length;
+
+    const colorsSets = stockCountsSets.filter((set) =>
+      (set.games as any[]).every(
+        (game) =>
+          game.entrant1P1Stocks &&
+          game.entrant1P1Stocks >= 100 &&
+          game.entrant2P1Stocks &&
+          game.entrant2P1Stocks >= 100,
+      ),
+    );
+    const withColors = colorsSets.length;
+
+    return {
+      sets,
+      withCharactersAndStages,
+      withStockCounts,
+      withColors,
+    };
+  }
+
+  return {
+    sets: 0,
+    withCharactersAndStages: 0,
+    withStockCounts: 0,
+    withColors: 0,
+  };
+}
+
 const excludedSlugs = new Set<string>([]);
 const excludedOwnerIds = new Set([906371, 1031337]);
 const progress = ['-', '\\', '|', '/'];
@@ -125,98 +224,25 @@ async function getTournament(
           iProgress++;
           process.stdout.write(`\b${progress[iProgress % progress.length]}`);
 
-          if (
-            Array.isArray(groupResponse.entities?.entrants) &&
-            Array.isArray(groupResponse.entities?.sets)
-          ) {
-            const entrantIdToPlayerIds = new Map<number, number[]>(
-              (groupResponse.entities.entrants as any[]).map((entrant) => [
-                entrant.id,
-                Object.values(entrant.mutations.players).map(
-                  (player: any) => player.id,
-                ),
-              ]),
+          const { sets, withCharactersAndStages, withStockCounts, withColors } =
+            processGroupResponse(
+              groupResponse,
+              localPlayerIds,
+              uniquePlayerIds,
             );
-            const eligibleSets = (groupResponse.entities.sets as any[]).filter(
-              (set) =>
-                set.state === 3 &&
-                Number.isInteger(set.entrant1Id) &&
-                Number.isInteger(set.entrant2Id) &&
-                set.entrant1Score !== -1 &&
-                set.entrant2Score !== -1 &&
-                !set.unreachable,
-            );
-            eligibleSets.forEach((set) => {
-              const playerIdPred = (playerId: number) => {
-                localPlayerIds.add(playerId);
-                uniquePlayerIds.add(playerId);
-              };
-              entrantIdToPlayerIds.get(set.entrant1Id)?.forEach(playerIdPred);
-              entrantIdToPlayerIds.get(set.entrant2Id)?.forEach(playerIdPred);
+
+          stats.sets += sets;
+          stats.withCharactersAndStages += withCharactersAndStages;
+          stats.withStockCounts += withStockCounts;
+          stats.withColors += withColors;
+          if (sets > 0) {
+            await mkdir(path.join(monthPath, slug), {
+              recursive: true,
             });
-            const sets = eligibleSets.length;
-
-            const charactersAndStagesSets = eligibleSets.filter(
-              (set) =>
-                Array.isArray(set.entrant1CharacterIds) &&
-                (set.entrant1CharacterIds as any[]).length > 0 &&
-                (set.entrant1CharacterIds as any[]).every(
-                  (characterId) =>
-                    Number.isInteger(characterId) &&
-                    characterId >= 1 &&
-                    characterId <= 26,
-                ) &&
-                Array.isArray(set.entrant2CharacterIds) &&
-                (set.entrant2CharacterIds as any[]).length > 0 &&
-                (set.entrant2CharacterIds as any[]).every(
-                  (characterId) =>
-                    Number.isInteger(characterId) &&
-                    characterId >= 1 &&
-                    characterId <= 26,
-                ) &&
-                Array.isArray(set.games) &&
-                set.games.length > 0 &&
-                (set.games as any[]).every(
-                  (game) =>
-                    Number.isInteger(game.stageId) &&
-                    game.stageId >= 1 &&
-                    game.stageId <= 29,
-                ),
+            await writeFile(
+              path.join(monthPath, slug, `${group.id}.json`),
+              JSON.stringify(groupResponse),
             );
-            const withCharactersAndStages = charactersAndStagesSets.length;
-
-            const stockCountsSets = charactersAndStagesSets.filter((set) =>
-              (set.games as any[]).every(
-                (game) => game.entrant1P1Stocks || game.entrant2P1Stocks,
-              ),
-            );
-            const withStockCounts = stockCountsSets.length;
-
-            const colorsSets = stockCountsSets.filter((set) =>
-              (set.games as any[]).every(
-                (game) =>
-                  game.entrant1P1Stocks &&
-                  game.entrant1P1Stocks >= 100 &&
-                  game.entrant2P1Stocks &&
-                  game.entrant2P1Stocks >= 100,
-              ),
-            );
-            const withColors = colorsSets.length;
-
-            stats.sets += sets;
-            stats.withCharactersAndStages += withCharactersAndStages;
-            stats.withStockCounts += withStockCounts;
-            stats.withColors += withColors;
-
-            if (sets > 0) {
-              await mkdir(path.join(monthPath, slug), {
-                recursive: true,
-              });
-              await writeFile(
-                path.join(monthPath, slug, `${group.id}.json`),
-                JSON.stringify(groupResponse),
-              );
-            }
           }
         }
       }
@@ -344,8 +370,9 @@ async function everyMonth(
     console.log(`${slugs.length} tournaments to fetch`);
 
     let numTournaments = 0;
+    const entrantsArr: number[] = [];
     const stats = getEmptyStats();
-    const playerIds = new Set<number>();
+    const uniquePlayerIds = new Set<number>();
     for (let i = 0; i < slugs.length; i++) {
       const {
         entrants,
@@ -355,11 +382,14 @@ async function everyMonth(
         withColors,
       } = await getTournament(
         slugs[i],
-        playerIds,
+        uniquePlayerIds,
         path.join(process.cwd(), 'onlineTournaments', `${year}-${monthI + 1}`),
       );
       if (sets > 0) {
         numTournaments++;
+        if (entrants > 0) {
+          entrantsArr.push(entrants);
+        }
       }
       stats.entrants += entrants;
       stats.sets += sets;
@@ -378,17 +408,109 @@ async function everyMonth(
     }
     console.log('\n');
 
+    entrantsArr.sort();
+    const halfI = Math.floor(entrantsArr.length / 2);
+    const medianEntrants =
+      entrantsArr.length % 2 === 0
+        ? (entrantsArr[halfI - 1] + entrantsArr[halfI]) / 2
+        : entrantsArr[halfI];
     await appendFile(
       path.join(process.cwd(), 'results.csv'),
-      `${year},${monthI + 1},${numTournaments},${stats.entrants},${playerIds.size},${stats.sets},${stats.withCharactersAndStages},${stats.withStockCounts},${stats.withColors}\n`,
+      `${year},${monthI + 1},${numTournaments},${stats.entrants},${uniquePlayerIds.size},${medianEntrants},${stats.sets},${stats.withCharactersAndStages},${stats.withStockCounts},${stats.withColors}\n`,
     );
 
     ({ year, monthI, afterS, beforeS } = progressOneMonth(year, monthI));
   }
 }
 
+async function reprocess() {
+  const tournamentsPath = path.join(process.cwd(), 'offlineTournaments');
+  const monthSubdirs = (await readdir(tournamentsPath, { withFileTypes: true }))
+    .filter(
+      (dirent) =>
+        dirent.isDirectory() &&
+        /^[0-9][0-9][0-9][0-9]-[0-9][0-9]?$/.test(dirent.name),
+    )
+    .map((dirent) =>
+      dirent.name.split('-').map((part) => Number.parseInt(part, 10)),
+    )
+    .sort(([aYear, aMonth], [bYear, bMonth]) => {
+      if (aYear !== bYear) {
+        return aYear - bYear;
+      }
+      return aMonth - bMonth;
+    });
+
+  for (const [year, month] of monthSubdirs) {
+    const monthPath = path.join(tournamentsPath, `${year}-${month}`);
+    const slugSubdirs = (await readdir(monthPath, { withFileTypes: true }))
+      .filter((dirent) => dirent.isDirectory())
+      .map((dirent) => dirent.name);
+    console.log(
+      `${year}/${month}: ${slugSubdirs.length} tournaments to reprocess`,
+    );
+
+    const stats = getEmptyStats();
+    const uniquePlayerIds = new Set<number>();
+    const entrantsArr = await Promise.all(
+      // get tournament
+      slugSubdirs.map(async (slugSubdir) => {
+        const slugPath = path.join(monthPath, slugSubdir);
+        const jsonSubpaths = (await readdir(slugPath, { withFileTypes: true }))
+          .filter((dirent) => dirent.isFile() && dirent.name.endsWith('.json'))
+          .map((dirent) => dirent.name);
+        const slugSubdirIndex = jsonSubpaths.indexOf(`${slugSubdir}.json`);
+        if (slugSubdirIndex !== -1) {
+          jsonSubpaths.splice(slugSubdirIndex, 1);
+        }
+
+        const localPlayerIds = new Set<number>();
+        await Promise.all(
+          // get group
+          jsonSubpaths.map(async (jsonSubpath) => {
+            const groupResponse = JSON.parse(
+              await readFile(path.join(slugPath, jsonSubpath), {
+                encoding: 'utf8',
+              }),
+            );
+
+            const {
+              sets,
+              withCharactersAndStages,
+              withStockCounts,
+              withColors,
+            } = processGroupResponse(
+              groupResponse,
+              localPlayerIds,
+              uniquePlayerIds,
+            );
+
+            stats.sets += sets;
+            stats.withCharactersAndStages += withCharactersAndStages;
+            stats.withStockCounts += withStockCounts;
+            stats.withColors += withColors;
+          }),
+        );
+        return localPlayerIds.size;
+      }),
+    );
+
+    entrantsArr.sort();
+    const halfI = Math.floor(entrantsArr.length / 2);
+    const medianEntrants =
+      entrantsArr.length % 2 === 0
+        ? (entrantsArr[halfI - 1] + entrantsArr[halfI]) / 2
+        : entrantsArr[halfI];
+    await appendFile(
+      path.join(process.cwd(), 'results.csv'),
+      `${year},${month},${entrantsArr.length},${entrantsArr.reduce((prev, curr) => prev + curr)},${uniquePlayerIds.size},${medianEntrants},${stats.sets},${stats.withCharactersAndStages},${stats.withStockCounts},${stats.withColors}\n`,
+    );
+  }
+}
+
 if (process.argv.length < 3) {
   console.log('node build/src/main.js [START.GG API KEY]');
+  reprocess();
 } else {
   let results = '';
   const resultsPath = path.join(process.cwd(), 'results.csv');
