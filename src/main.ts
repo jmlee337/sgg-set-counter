@@ -1,23 +1,10 @@
-import { appendFile, mkdir, readdir, readFile, writeFile } from 'fs/promises';
+import { appendFile, readFile } from 'fs/promises';
 import path from 'path';
 
 type Stats = {
   entrants: number;
-  sets: number;
-  withCharactersAndStages: number;
-  withStockCounts: number;
-  withColors: number;
+  rulesetId: number;
 };
-
-function getEmptyStats(): Stats {
-  return {
-    entrants: 0,
-    sets: 0,
-    withCharactersAndStages: 0,
-    withStockCounts: 0,
-    withColors: 0,
-  };
-}
 
 async function wrappedFetch(
   input: URL | RequestInfo,
@@ -63,136 +50,32 @@ async function wrappedFetch(
   }
 }
 
-function processGroupResponse(
-  groupResponse: any,
-  localPlayerIds: Set<number>,
-  uniquePlayerIds: Set<number>,
-) {
-  if (
-    Array.isArray(groupResponse.entities?.entrants) &&
-    Array.isArray(groupResponse.entities?.sets)
-  ) {
-    const entrantIdToPlayerIds = new Map<number, number[]>(
-      (groupResponse.entities.entrants as any[]).map((entrant) => [
-        entrant.id,
-        Object.values(entrant.mutations.players).map(
-          (player: any) => player.id,
-        ),
-      ]),
-    );
-    const eligibleSets = (groupResponse.entities.sets as any[]).filter(
-      (set) =>
-        set.state === 3 &&
-        Number.isInteger(set.entrant1Id) &&
-        Number.isInteger(set.entrant2Id) &&
-        set.entrant1Score !== -1 &&
-        set.entrant2Score !== -1 &&
-        !set.unreachable,
-    );
-    eligibleSets.forEach((set) => {
-      const playerIdPred = (playerId: number) => {
-        localPlayerIds.add(playerId);
-        uniquePlayerIds.add(playerId);
-      };
-      entrantIdToPlayerIds.get(set.entrant1Id)?.forEach(playerIdPred);
-      entrantIdToPlayerIds.get(set.entrant2Id)?.forEach(playerIdPred);
-    });
-    const sets = eligibleSets.length;
-
-    const charactersAndStagesSets = eligibleSets.filter(
-      (set) =>
-        Array.isArray(set.entrant1CharacterIds) &&
-        (set.entrant1CharacterIds as any[]).length > 0 &&
-        (set.entrant1CharacterIds as any[]).every(
-          (characterId) =>
-            Number.isInteger(characterId) &&
-            characterId >= 1 &&
-            characterId <= 26,
-        ) &&
-        Array.isArray(set.entrant2CharacterIds) &&
-        (set.entrant2CharacterIds as any[]).length > 0 &&
-        (set.entrant2CharacterIds as any[]).every(
-          (characterId) =>
-            Number.isInteger(characterId) &&
-            characterId >= 1 &&
-            characterId <= 26,
-        ) &&
-        Array.isArray(set.games) &&
-        set.games.length > 0 &&
-        (set.games as any[]).every(
-          (game) =>
-            Number.isInteger(game.stageId) &&
-            game.stageId >= 1 &&
-            game.stageId <= 29,
-        ),
-    );
-    const withCharactersAndStages = charactersAndStagesSets.length;
-
-    const stockCountsSets = charactersAndStagesSets.filter((set) =>
-      (set.games as any[]).every(
-        (game) => game.entrant1P1Stocks || game.entrant2P1Stocks,
-      ),
-    );
-    const withStockCounts = stockCountsSets.length;
-
-    const colorsSets = stockCountsSets.filter((set) =>
-      (set.games as any[]).every(
-        (game) =>
-          game.entrant1P1Stocks &&
-          game.entrant1P1Stocks >= 100 &&
-          game.entrant2P1Stocks &&
-          game.entrant2P1Stocks >= 100,
-      ),
-    );
-    const withColors = colorsSets.length;
-
-    return {
-      sets,
-      withCharactersAndStages,
-      withStockCounts,
-      withColors,
-    };
-  }
-
-  return {
-    sets: 0,
-    withCharactersAndStages: 0,
-    withStockCounts: 0,
-    withColors: 0,
-  };
-}
-
 const excludedSlugs = new Set<string>([]);
 const excludedOwnerIds = new Set([906371, 1031337]);
-const progress = ['-', '\\', '|', '/'];
-async function getTournament(
-  slug: string,
-  uniquePlayerIds: Set<number>,
-  monthPath: string,
-): Promise<Stats> {
-  const stats = getEmptyStats();
+async function getTournament(slug: string): Promise<Stats[]> {
+  const statsArr: Stats[] = [];
   if (excludedSlugs.has(slug)) {
-    return stats;
+    return statsArr;
   }
 
   const tournamentResponse = await wrappedFetch(
-    `https://api.start.gg/tournament/${slug}?expand[]=event&expand[]=phase`,
+    `https://api.start.gg/tournament/${slug}?expand[]=event&expand[]=entrants`,
   );
   if (excludedOwnerIds.has(tournamentResponse.entities.tournament.ownerId)) {
-    return stats;
+    return statsArr;
   }
 
-  let iProgress = 0;
-  process.stdout.write(progress[iProgress % progress.length]);
-
-  const localPlayerIds = new Set<number>();
-  if (Array.isArray(tournamentResponse.entities.event)) {
+  if (
+    Array.isArray(tournamentResponse.entities.entrants) &&
+    Array.isArray(tournamentResponse.entities.event)
+  ) {
     const eligibleEvents = (tournamentResponse.entities.event as any[]).filter(
       (event) =>
         Number.isInteger(event.id) &&
         event.videogameId === 1 &&
         (event.state === 2 || event.state === 3) &&
-        event.isOnline,
+        event.isOnline &&
+        Number.isInteger(event.rulesetId),
     );
     if (eligibleEvents.length > 10) {
       console.log(
@@ -200,64 +83,16 @@ async function getTournament(
       );
     }
     for (const event of eligibleEvents) {
-      const eventResponse = await wrappedFetch(
-        `https://api.start.gg/event/${event.id}?expand[]=groups`,
-      );
-      iProgress++;
-      process.stdout.write(`\b${progress[iProgress % progress.length]}`);
-
-      if (Array.isArray(eventResponse.entities?.groups)) {
-        const eligibleGroups = (eventResponse.entities.groups as any[]).filter(
-          (group) =>
-            Number.isInteger(group.id) &&
-            (group.state === 2 || group.state === 3),
-        );
-        if (eligibleGroups.length > 200) {
-          console.log(
-            `\n${slug} ${tournamentResponse.entities.tournament.ownerId}`,
-          );
-        }
-        for (const group of eligibleGroups) {
-          const groupResponse = await wrappedFetch(
-            `https://api.start.gg/phase_group/${group.id}?expand[]=sets&expand[]=entrants`,
-          );
-          iProgress++;
-          process.stdout.write(`\b${progress[iProgress % progress.length]}`);
-
-          const { sets, withCharactersAndStages, withStockCounts, withColors } =
-            processGroupResponse(
-              groupResponse,
-              localPlayerIds,
-              uniquePlayerIds,
-            );
-
-          stats.sets += sets;
-          stats.withCharactersAndStages += withCharactersAndStages;
-          stats.withStockCounts += withStockCounts;
-          stats.withColors += withColors;
-          if (sets > 0) {
-            await mkdir(path.join(monthPath, slug), {
-              recursive: true,
-            });
-            await writeFile(
-              path.join(monthPath, slug, `${group.id}.json`),
-              JSON.stringify(groupResponse),
-            );
-          }
-        }
-      }
+      statsArr.push({
+        entrants: (tournamentResponse.entities.entrants as any[]).filter(
+          (entrant) => entrant.eventId === event.id,
+        ).length,
+        rulesetId: event.rulesetId,
+      });
     }
   }
-  if (stats.sets > 0) {
-    await writeFile(
-      path.join(monthPath, slug, `${slug}.json`),
-      JSON.stringify(tournamentResponse),
-    );
-  }
 
-  process.stdout.write('\b');
-  stats.entrants = localPlayerIds.size;
-  return stats;
+  return statsArr;
 }
 
 async function fetchGql(key: string, query: string, variables: any) {
@@ -355,9 +190,9 @@ function progressOneMonth(year: number, monthI: number) {
 
 async function everyMonth(
   key: string,
-  // Modern Melee history begins February 2019
-  year: number = 2019,
-  monthI: number = 1,
+  // unfrozen stadium was introduced aug 2025, so start a couple months before
+  year: number = 2025,
+  monthI: number = 5,
 ) {
   let afterS = Date.UTC(year, monthI) / 1000;
   let beforeS = Date.UTC(year, monthI + 1) / 1000;
@@ -369,36 +204,12 @@ async function everyMonth(
     const slugs = await getTournamentSlugs(key, afterS, beforeS);
     console.log(`${slugs.length} tournaments to fetch`);
 
-    const monthPath = path.join(
-      process.cwd(),
-      'onlineTournaments',
-      `${year}-${monthI + 1}`,
-    );
-    await mkdir(monthPath, { recursive: true });
-
-    let numTournaments = 0;
-    const entrantsArr: number[] = [];
-    const stats = getEmptyStats();
-    const uniquePlayerIds = new Set<number>();
+    const rulesetIdToEntrants = new Map<number, number>();
     for (let i = 0; i < slugs.length; i++) {
-      const {
-        entrants,
-        sets,
-        withCharactersAndStages,
-        withStockCounts,
-        withColors,
-      } = await getTournament(slugs[i], uniquePlayerIds, monthPath);
-      if (sets > 0) {
-        numTournaments++;
-        if (entrants > 0) {
-          entrantsArr.push(entrants);
-        }
-      }
-      stats.entrants += entrants;
-      stats.sets += sets;
-      stats.withCharactersAndStages += withCharactersAndStages;
-      stats.withStockCounts += withStockCounts;
-      stats.withColors += withColors;
+      (await getTournament(slugs[i])).forEach((stats) => {
+        const entrants = rulesetIdToEntrants.get(stats.rulesetId) ?? 0;
+        rulesetIdToEntrants.set(stats.rulesetId, entrants + stats.entrants);
+      });
       process.stdout.write('.');
       if ((i + 1) % 50 === 0) {
         process.stdout.write(`[${i + 1}]\n`);
@@ -409,113 +220,20 @@ async function everyMonth(
         process.stdout.write(`[${(i + 1) % 100}]`);
       }
     }
+    console.log(rulesetIdToEntrants);
     console.log('\n');
 
-    entrantsArr.sort();
-    const halfI = Math.floor(entrantsArr.length / 2);
-    const medianEntrants =
-      entrantsArr.length % 2 === 0
-        ? (entrantsArr[halfI - 1] + entrantsArr[halfI]) / 2
-        : entrantsArr[halfI];
     await appendFile(
       path.join(process.cwd(), 'results.csv'),
-      `${year},${monthI + 1},${numTournaments},${stats.entrants},${uniquePlayerIds.size},${medianEntrants},${stats.sets},${stats.withCharactersAndStages},${stats.withStockCounts},${stats.withColors}\n`,
+      `${year},${monthI + 1},${rulesetIdToEntrants.get(2) ?? 0},${(rulesetIdToEntrants.get(138) ?? 0) + (rulesetIdToEntrants.get(169) ?? 0)}\n`,
     );
 
     ({ year, monthI, afterS, beforeS } = progressOneMonth(year, monthI));
   }
 }
 
-async function reprocess() {
-  const tournamentsPath = path.join(process.cwd(), 'onlineTournaments');
-  const monthSubdirs = (await readdir(tournamentsPath, { withFileTypes: true }))
-    .filter(
-      (dirent) =>
-        dirent.isDirectory() &&
-        /^[0-9][0-9][0-9][0-9]-[0-9][0-9]?$/.test(dirent.name),
-    )
-    .map((dirent) =>
-      dirent.name.split('-').map((part) => Number.parseInt(part, 10)),
-    )
-    .sort(([aYear, aMonth], [bYear, bMonth]) => {
-      if (aYear !== bYear) {
-        return aYear - bYear;
-      }
-      return aMonth - bMonth;
-    });
-
-  for (const [year, month] of monthSubdirs) {
-    const monthPath = path.join(tournamentsPath, `${year}-${month}`);
-    const slugSubdirs = (await readdir(monthPath, { withFileTypes: true }))
-      .filter((dirent) => dirent.isDirectory())
-      .map((dirent) => dirent.name);
-    console.log(
-      `${year}/${month}: ${slugSubdirs.length} tournaments to reprocess`,
-    );
-
-    const stats = getEmptyStats();
-    const uniquePlayerIds = new Set<number>();
-    const entrantsArr = await Promise.all(
-      // get tournament
-      slugSubdirs.map(async (slugSubdir) => {
-        const slugPath = path.join(monthPath, slugSubdir);
-        const jsonSubpaths = (await readdir(slugPath, { withFileTypes: true }))
-          .filter((dirent) => dirent.isFile() && dirent.name.endsWith('.json'))
-          .map((dirent) => dirent.name);
-        const slugSubdirIndex = jsonSubpaths.indexOf(`${slugSubdir}.json`);
-        if (slugSubdirIndex !== -1) {
-          jsonSubpaths.splice(slugSubdirIndex, 1);
-        }
-
-        const localPlayerIds = new Set<number>();
-        await Promise.all(
-          // get group
-          jsonSubpaths.map(async (jsonSubpath) => {
-            const groupResponse = JSON.parse(
-              await readFile(path.join(slugPath, jsonSubpath), {
-                encoding: 'utf8',
-              }),
-            );
-
-            const {
-              sets,
-              withCharactersAndStages,
-              withStockCounts,
-              withColors,
-            } = processGroupResponse(
-              groupResponse,
-              localPlayerIds,
-              uniquePlayerIds,
-            );
-
-            stats.sets += sets;
-            stats.withCharactersAndStages += withCharactersAndStages;
-            stats.withStockCounts += withStockCounts;
-            stats.withColors += withColors;
-          }),
-        );
-        return localPlayerIds.size;
-      }),
-    );
-
-    entrantsArr.sort((a, b) => a - b);
-    const halfI = Math.floor(entrantsArr.length / 2);
-    const medianEntrants =
-      entrantsArr.length > 0
-        ? entrantsArr.length % 2 === 0
-          ? (entrantsArr[halfI - 1] + entrantsArr[halfI]) / 2
-          : entrantsArr[halfI]
-        : 0;
-    await appendFile(
-      path.join(process.cwd(), 'results.csv'),
-      `${year},${month},${entrantsArr.length},${entrantsArr.reduce((prev, curr) => prev + curr, 0)},${uniquePlayerIds.size},${medianEntrants},${stats.sets},${stats.withCharactersAndStages},${stats.withStockCounts},${stats.withColors}\n`,
-    );
-  }
-}
-
 if (process.argv.length < 3) {
   console.log('node build/src/main.js [START.GG API KEY]');
-  reprocess();
 } else {
   let results = '';
   const resultsPath = path.join(process.cwd(), 'results.csv');
