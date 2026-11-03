@@ -406,12 +406,14 @@ async function everyMonth(
     }
     console.log('\n');
 
-    entrantsArr.sort();
+    entrantsArr.sort((a, b) => a - b);
     const halfI = Math.floor(entrantsArr.length / 2);
     const medianEntrants =
-      entrantsArr.length % 2 === 0
-        ? (entrantsArr[halfI - 1] + entrantsArr[halfI]) / 2
-        : entrantsArr[halfI];
+      entrantsArr.length > 0
+        ? entrantsArr.length % 2 === 0
+          ? (entrantsArr[halfI - 1] + entrantsArr[halfI]) / 2
+          : entrantsArr[halfI]
+        : 0;
     await appendFile(
       path.join(process.cwd(), 'results.csv'),
       `${year},${monthI + 1},${numTournaments},${stats.entrants},${uniquePlayerIds.size},${medianEntrants},${stats.sets},${stats.withCharactersAndStages},${stats.withStockCounts},${stats.withColors}\n`,
